@@ -4,9 +4,21 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from imblearn.over_sampling import SMOTE
 
+import plotly.express as px
+from plotly.subplots import make_subplots
+
 from typing import Union
 from scipy import stats
 from .bootstrap import get_bootstraped_data, tqdm_
+
+# FixMe
+pd.options.plotting.backend = "plotly"
+
+config_plotly = {'modeBarButtonsToAdd': [
+    'drawopenpath', 'hoverCompare'
+]}
+sw = dict(config=config_plotly,  renderer='iframe')
+
 
 class DataToCompare:
     def __init__(self,
@@ -116,6 +128,44 @@ class ComparingData:
             # smote = SMOTE(sampling_strategy='auto')
             # X_resampled, y_resampled = smote.fit_resample(X, y)
         return self._smote_oversampled_data
+
+    def get_plotly_hist(self,
+                        feature: str,
+                        opacity: float = 0.3,
+                        title: str = None):
+
+        if self.data1.feature_descriptions is not None:
+            description = self.data1.feature_descriptions.get(feature, feature)
+
+        if title is None:
+            title = f'Сравнение распределений {description}'
+
+        fig = px.histogram(data_frame=self.data1,
+                           x=feature,
+                           color_discrete_sequence=['blue'],
+                           opacity=opacity,
+                           labels={feature: self.data1.name}
+                           )
+
+        fig.add_trace(
+            px.histogram(
+                data_frame=self.data2,
+                x=feature,
+                color_discrete_sequence=['red'],
+                opacity=opacity,
+                labels={feature: self.data2.name}
+            ).data[0]
+        )
+
+        fig.update_layout(
+            title=title,
+            xaxis=dict(title='Значения'),
+            yaxis=dict(title='Частота'),
+            barmode='overlay'
+        )
+
+        fig.update_traces(showlegend=True)
+        fig.show(**sw)
 
     def _get_sns_histplot_overlay(self, data1, data2, ax,
                                   plot_name='Title'):
