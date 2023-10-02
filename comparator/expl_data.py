@@ -210,8 +210,11 @@ class ComparingData:
                 bar.set_facecolor('gray')
                 bar.set_edgecolor('black')
 
+        max_height = max(bar.get_height() for bar in bars)
+        ymax_vlines = (max_height * 0.9).round()
+
         plt.style.use('ggplot')
-        plt.vlines(quants, ymin=0, ymax=50, linestyle='--')
+        plt.vlines(quants, ymin=0, ymax=ymax_vlines, linestyle='--', color='black')
         plt.xlabel('boot_data')
         plt.ylabel('frequency')
         plt.title("Histogram of boot_data")
