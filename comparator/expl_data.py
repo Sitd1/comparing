@@ -167,6 +167,57 @@ class ComparingData:
         fig.update_traces(showlegend=True)
         fig.show(**sw)
 
+    def _get_diff_bootstrap_vals_hist(self,
+                                      column_name,
+                                      statistic='mean',
+                                      bootstrap_conf_level: float = 0.95):
+        suffix = f'booted_data_{statistic}'
+        # находим разницу средних -> np.array
+        first = self.data1.__getattribute__(suffix)[column_name].values
+        second = self.data2.__getattribute__(suffix)[column_name].values
+        booted_datas_diff = first - second
+
+        # находим доверительный интервал bootstrap_conf_level
+        left_quant = (1 - bootstrap_conf_level) / 2
+        right_quant = 1 - (1 - bootstrap_conf_level) / 2
+        quants = np.quantile(booted_datas_diff, [left_quant, right_quant])
+
+        #
+        p_1 = stats.norm.cdf(
+            x=0,
+            loc=np.mean(booted_datas_diff),
+            scale=np.std(booted_datas_diff)
+        )
+        p_2 = stats.norm.cdf(
+            x=0,
+            loc=-np.mean(booted_datas_diff),
+            scale=np.std(booted_datas_diff)
+        )
+
+        p_value = min(p_1, p_2) * 2
+
+        # # визуализация
+        # sns.histplot(booted_datas_diff, kde=False, color="blue",
+        #              label='gis_avg_permeability', alpha=0.5)
+
+        # Визуализация
+        _, _, bars = plt.hist(booted_datas_diff, bins=50)
+
+        for bar in bars:
+            if abs(bar.get_x()) <= quants[0] or abs(bar.get_x()) >= quants[1]:
+                bar.set_facecolor('red')
+            else:
+                bar.set_facecolor('gray')
+                bar.set_edgecolor('black')
+
+        plt.style.use('ggplot')
+        plt.vlines(quants, ymin=0, ymax=50, linestyle='--')
+        plt.xlabel('boot_data')
+        plt.ylabel('frequency')
+        plt.title("Histogram of boot_data")
+        plt.show()
+
+
     def _get_sns_histplot_overlay(self, data1, data2, ax,
                                   plot_name='Title'):
         sns.histplot(data1, kde=True, color="blue",
