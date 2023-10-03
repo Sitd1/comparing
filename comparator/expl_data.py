@@ -9,6 +9,10 @@ from plotly.subplots import make_subplots
 
 from typing import Union
 from scipy import stats
+from sklearn.manifold import TSNE
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
 from .bootstrap import get_bootstraped_data, tqdm_
 
 # FixMe
@@ -317,3 +321,45 @@ def make_test_bw_samples(
         test_name = test.__name__
         return p_value, test_name
     return p_value
+
+
+def make_tsne_scater(data: pd.DataFrame,
+                     perplexity: int,
+                     label_column_name: str,
+                     label_values: list = None,
+                     color_mapping: dict = None
+):
+    scatter_xyz = ('x', 'y', 'z')
+
+    if label_values is None:
+        label_values = [1]
+
+    data = data[data.index.notna()]
+
+    if label_values is not None:
+        data = data[data[label_column_name].isin(label_values)]
+
+    # pipeline
+    scaler = StandardScaler()
+    tsne = TSNE(n_components=2, perplexity=perplexity, n_iter=300)
+    pipeline = Pipeline([('scaler', scaler), ('tsne', tsne)])
+    # fit_transform
+    data_scaled_tsne = pipeline.fit_transform(data)
+    # preparation
+    data_scaled_tsne = pd.DataFrame(dict(zip(data.index, data_scaled_tsne))).T
+    columns = data_scaled_tsne.columns
+    data_scaled_tsne.loc[:, label_column_name] = data.loc[:, label_column_name].astype('str')
+    # data_scaled_tsne['g_type_'] = data_scaled_tsne['g_type_'].fillna('other')
+
+    prop = dict(zip(scatter_xyz, columns))
+
+    px.scatter(
+        data_frame=data_scaled_tsne.reset_index(),
+        **prop,
+        color=label_column_name,
+        color_discrete_map=color_mapping,
+        hover_data=['index', label_column_name],
+        color_continuous_scale='Portland',
+        opacity=0.7,
+        title=f'perplexity={perplexity}'
+        ).show(**sw)
