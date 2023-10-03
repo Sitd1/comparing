@@ -4,23 +4,46 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from imblearn.over_sampling import SMOTE
 
+import plotly.express as px
+from plotly.subplots import make_subplots
+
 from typing import Union
 from scipy import stats
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
 from .bootstrap import get_bootstraped_data, tqdm_
+
+# FixMe
+pd.options.plotting.backend = "plotly"
+
+config_plotly = {'modeBarButtonsToAdd': [
+    'drawopenpath', 'hoverCompare'
+]}
+sw = dict(config=config_plotly,  renderer='iframe')
+
 
 class DataToCompare:
     def __init__(self,
                  data: pd.DataFrame,
-                 name: str = 'name',
+                 label_column_name: str,
                  feature_descriptions: dict = None,
+                 label_values: list = None,
+                 color_mapping: dict = None,
                  bootstrap_n: int = 10000,
                  do_tqdm=False
                  ):
 
         self.data = data
-        self.name = name
+        self.label_column_name = label_column_name
         self.feature_descriptions = feature_descriptions
         self.bootstrap_n = bootstrap_n
+        self.label_values = label_values
+        self.color_mapping = color_mapping
+        self.do_tqdm = do_tqdm
+
         self._booted_data_mean = None
         self._booted_data_median = None
         self._smote_oversampled_data = None
@@ -117,6 +140,98 @@ class ComparingData:
             # X_resampled, y_resampled = smote.fit_resample(X, y)
         return self._smote_oversampled_data
 
+    def get_plotly_hist(self,
+                        column_name: str,
+                        opacity: float = 0.3,
+                        title: str = None):
+
+        if self.data1.feature_descriptions is not None:
+            description = self.data1.feature_descriptions.get(column_name, column_name)
+
+        if title is None:
+            title = f'Сравнение распределений "{description}"'
+
+        fig = px.histogram(data_frame=self.data1.data,
+                           x=column_name,
+                           color_discrete_sequence=['blue'],
+                           opacity=opacity,
+                           labels={column_name: self.data1.name}
+                           )
+
+        fig.add_trace(
+            px.histogram(
+                data_frame=self.data2.data,
+                x=column_name,
+                color_discrete_sequence=['red'],
+                opacity=opacity,
+                labels={column_name: self.data2.name}
+            ).data[0]
+        )
+
+        fig.update_layout(
+            title=title,
+            xaxis=dict(title='Значения'),
+            yaxis=dict(title='Частота'),
+            barmode='overlay'
+        )
+
+        fig.update_traces(showlegend=True)
+        fig.show(**sw)
+
+    def _get_diff_bootstrap_vals_hist(self,
+                                      column_name,
+                                      statistic='mean',
+                                      bootstrap_conf_level: float = 0.95):
+        suffix = f'booted_data_{statistic}'
+        # находим разницу средних -> np.array
+        first = self.data1.__getattribute__(suffix)[column_name].values
+        second = self.data2.__getattribute__(suffix)[column_name].values
+        booted_datas_diff = first - second
+
+        # находим доверительный интервал bootstrap_conf_level
+        left_quant = (1 - bootstrap_conf_level) / 2
+        right_quant = 1 - (1 - bootstrap_conf_level) / 2
+        quants = np.quantile(booted_datas_diff, [left_quant, right_quant])
+
+        #
+        p_1 = stats.norm.cdf(
+            x=0,
+            loc=np.mean(booted_datas_diff),
+            scale=np.std(booted_datas_diff)
+        )
+        p_2 = stats.norm.cdf(
+            x=0,
+            loc=-np.mean(booted_datas_diff),
+            scale=np.std(booted_datas_diff)
+        )
+
+        p_value = min(p_1, p_2) * 2
+
+        # # визуализация
+        # sns.histplot(booted_datas_diff, kde=False, color="blue",
+        #              label='gis_avg_permeability', alpha=0.5)
+
+        # Визуализация
+        _, _, bars = plt.hist(booted_datas_diff, bins=50)
+
+        for bar in bars:
+            if abs(bar.get_x()) <= quants[0] or abs(bar.get_x()) >= quants[1]:
+                bar.set_facecolor('red')
+            else:
+                bar.set_facecolor('gray')
+                bar.set_edgecolor('black')
+
+        max_height = max(bar.get_height() for bar in bars)
+        ymax_vlines = (max_height * 0.9).round()
+
+        plt.style.use('ggplot')
+        plt.vlines(quants, ymin=0, ymax=ymax_vlines, linestyle='--', color='black')
+        plt.xlabel('boot_data')
+        plt.ylabel('frequency')
+        plt.title("Histogram of boot_data")
+        plt.show()
+
+
     def _get_sns_histplot_overlay(self, data1, data2, ax,
                                   plot_name='Title'):
         sns.histplot(data1, kde=True, color="blue",
@@ -127,49 +242,61 @@ class ComparingData:
         ax.legend()
 
     def get_compare_hists(self, feature):
-        fig, axes = plt.subplots(1, 3, figsize=(24, 6))
-        if self.data1.feature_descriptions is not None:
-            description = self.data1.feature_descriptions.get(feature, feature)
-        else:
-            description = feature
-        # make hists
-        properties = ['data', 'booted_data_mean', 'booted_data_median']
-        captions = ['Исходные данные',
-                    'Бутстрапированные данные (среднее)',
-                    'Бутстрапированные данные (медиана)'
-        ]
 
-        for i, prop in enumerate(properties):
+        # if self.data1.feature_descriptions is not None:
+        #     description = self.data1.feature_descriptions.get(feature, feature)
+        # else:
+        #     description = feature
 
-            data1 = self.data1.__getattribute__(prop)[feature]
-            data2 = self.data2.__getattribute__(prop)[feature]
-            # Тест на стат различие выборок
-            p_value, test_name = make_test_bw_samples(
-                data1.values,
-                data2.values,
-                alpha=self.alpha,
-                show_test_name=True
-            )
-            p_value = round(p_value, 4)
-            # Тест Шпиро-Уилка
-            test_shapiro = map(stats.shapiro, [data1.values, data2.values])
-            ps1, ps2 = map(lambda x: round(x[1], 4), test_shapiro)
-            # Оформление заголовка
-            title = '\n'.join(
-                [captions[i],
-                 description,
-                 f'Рез.теста Шапиро-Уилка: data1: {ps1}, data2: {ps2}',
-                 f'Название теста:{test_name}',
-                 f'p_value = {p_value}',
-                ]
-            )
-            # Вывод графика
-            self._get_sns_histplot_overlay(
-                data1=data1,
-                data2=data2,
-                ax=axes[i],
-                plot_name=title
-            )
+        # # make hists
+        # properties = ['booted_data_mean', 'booted_data_median']
+        # captions = ['Бутстрапированные данные (среднее)',
+        #             'Бутстрапированные данные (медиана)'
+        # ]
+        #
+
+        # вывод исходного графика
+        self.get_plotly_hist(feature)
+        # FixMe
+        # вывод бустрап по средним значениям
+        fig, axes = plt.subplots(1, 2, figsize=(24, 6))
+
+        data1 = self.data1.booted_data_mean[feature]
+        data2 = self.data2.booted_data_mean[feature]
+        title = 'Бутстрапированные данные (среднее)'
+
+        self._get_sns_histplot_overlay(
+            data1=data1,
+            data2=data2,
+            ax=axes[0],
+            plot_name=title
+        )
+
+        # вывод разницы бустрап по средним значениям
+        self._get_diff_bootstrap_vals_hist(
+            column_name=feature,
+            statistic='mean',
+        )
+
+        # вывод бустрап по медиане
+        fig, axes = plt.subplots(1, 2, figsize=(24, 6))
+
+        data1 = self.data1.booted_data_median[feature]
+        data2 = self.data2.booted_data_median[feature]
+        title = 'Бутстрапированные данные (медиана)'
+
+        self._get_sns_histplot_overlay(
+            data1=data1,
+            data2=data2,
+            ax=axes[0],
+            plot_name=title
+        )
+
+        # вывод разницы бустрап по медиане
+        self._get_diff_bootstrap_vals_hist(
+            column_name=feature,
+            statistic='median',
+        )
 
     def get_all_hists(self):
         for column in self.data1.data.columns:
@@ -201,3 +328,62 @@ def make_test_bw_samples(
         test_name = test.__name__
         return p_value, test_name
     return p_value
+
+
+def make_compare_scater(data: pd.DataFrame,
+                     label_column_name: str,
+                     embedding_: str = 'tsne',
+                     n_components: int = 2,
+                     perplexity: int = 30,
+                     label_values: list = None,
+                     color_mapping: dict = None
+):
+    """
+
+    """
+    scatter_xyz = ('x', 'y', 'z')
+
+    if label_values is None:
+        label_values = [1]
+
+    data = data[data.index.notna()]
+
+    if label_values is not None:
+        data = data[data[label_column_name].isin(label_values)]
+
+    # pipeline
+    scaler = StandardScaler()
+    # embeding setting
+    if embedding_ == 'tsne':
+        tsne = TSNE(n_components=n_components, perplexity=perplexity, n_iter=300)
+        pipeline = Pipeline([('scaler', scaler), ('tsne', tsne)])
+        title = f'Embedding type: TSNE, perplexity={perplexity}'
+    elif embedding_ == 'pca':
+        pca = PCA(n_components=n_components)
+        pipeline = Pipeline([('scaler', scaler), ('pca', pca)])
+        title = 'Embedding type: PCA'
+    else:
+        raise ValueError('"embedding_" Value should be in ["tsne", "pca"]')
+    # fit_transform
+    embedded_data = pipeline.fit_transform(data)
+    # preparation
+    embedded_data = pd.DataFrame(dict(zip(data.index, embedded_data))).T
+    columns = embedded_data.columns
+    embedded_data.loc[:, label_column_name] = data.loc[:, label_column_name].astype('str')
+    # data_scaled_tsne['g_type_'] = data_scaled_tsne['g_type_'].fillna('other')
+
+    prop = dict(zip(scatter_xyz, columns))
+    conf = dict(data_frame=embedded_data.reset_index(),
+                **prop,
+                color=label_column_name,
+                color_discrete_map=color_mapping,
+                hover_data=['index', label_column_name],
+                color_continuous_scale='Portland',
+                opacity=0.7,
+                title=title)
+    if n_components == 2:
+        px.scatter(**conf).show(**sw)
+    elif n_components == 3:
+        px.scatter_3d(**conf).show(**sw)
+    else:
+        raise ValueError('n_components should be in [2, 3]')
