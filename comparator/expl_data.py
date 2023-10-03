@@ -9,6 +9,7 @@ from plotly.subplots import make_subplots
 
 from typing import Union
 from scipy import stats
+from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -27,16 +28,22 @@ sw = dict(config=config_plotly,  renderer='iframe')
 class DataToCompare:
     def __init__(self,
                  data: pd.DataFrame,
-                 name: str = 'name',
+                 label_column_name: str,
                  feature_descriptions: dict = None,
+                 label_values: list = None,
+                 color_mapping: dict = None,
                  bootstrap_n: int = 10000,
                  do_tqdm=False
                  ):
 
         self.data = data
-        self.name = name
+        self.label_column_name = label_column_name
         self.feature_descriptions = feature_descriptions
         self.bootstrap_n = bootstrap_n
+        self.label_values = label_values
+        self.color_mapping = color_mapping
+        self.do_tqdm = do_tqdm
+
         self._booted_data_mean = None
         self._booted_data_median = None
         self._smote_oversampled_data = None
@@ -323,12 +330,17 @@ def make_test_bw_samples(
     return p_value
 
 
-def make_tsne_scater(data: pd.DataFrame,
-                     perplexity: int,
+def make_compare_scater(data: pd.DataFrame,
                      label_column_name: str,
+                     embedding_: str = 'tsne',
+                     n_components: int = 2,
+                     perplexity: int = 30,
                      label_values: list = None,
                      color_mapping: dict = None
 ):
+    """
+
+    """
     scatter_xyz = ('x', 'y', 'z')
 
     if label_values is None:
@@ -341,25 +353,37 @@ def make_tsne_scater(data: pd.DataFrame,
 
     # pipeline
     scaler = StandardScaler()
-    tsne = TSNE(n_components=2, perplexity=perplexity, n_iter=300)
-    pipeline = Pipeline([('scaler', scaler), ('tsne', tsne)])
+    # embeding setting
+    if embedding_ == 'tsne':
+        tsne = TSNE(n_components=n_components, perplexity=perplexity, n_iter=300)
+        pipeline = Pipeline([('scaler', scaler), ('tsne', tsne)])
+        title = f'Embedding type: TSNE, perplexity={perplexity}'
+    elif embedding_ == 'pca':
+        pca = PCA(n_components=n_components)
+        pipeline = Pipeline([('scaler', scaler), ('pca', pca)])
+        title = 'Embedding type: PCA'
+    else:
+        raise ValueError('"embedding_" Value should be in ["tsne", "pca"]')
     # fit_transform
-    data_scaled_tsne = pipeline.fit_transform(data)
+    embedded_data = pipeline.fit_transform(data)
     # preparation
-    data_scaled_tsne = pd.DataFrame(dict(zip(data.index, data_scaled_tsne))).T
-    columns = data_scaled_tsne.columns
-    data_scaled_tsne.loc[:, label_column_name] = data.loc[:, label_column_name].astype('str')
+    embedded_data = pd.DataFrame(dict(zip(data.index, embedded_data))).T
+    columns = embedded_data.columns
+    embedded_data.loc[:, label_column_name] = data.loc[:, label_column_name].astype('str')
     # data_scaled_tsne['g_type_'] = data_scaled_tsne['g_type_'].fillna('other')
 
     prop = dict(zip(scatter_xyz, columns))
-
-    px.scatter(
-        data_frame=data_scaled_tsne.reset_index(),
-        **prop,
-        color=label_column_name,
-        color_discrete_map=color_mapping,
-        hover_data=['index', label_column_name],
-        color_continuous_scale='Portland',
-        opacity=0.7,
-        title=f'perplexity={perplexity}'
-        ).show(**sw)
+    conf = dict(data_frame=embedded_data.reset_index(),
+                **prop,
+                color=label_column_name,
+                color_discrete_map=color_mapping,
+                hover_data=['index', label_column_name],
+                color_continuous_scale='Portland',
+                opacity=0.7,
+                title=title)
+    if n_components == 2:
+        px.scatter(**conf).show(**sw)
+    elif n_components == 3:
+        px.scatter_3d(**conf).show(**sw)
+    else:
+        raise ValueError('n_components should be in [2, 3]')
