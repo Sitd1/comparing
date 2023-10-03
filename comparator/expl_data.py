@@ -130,30 +130,30 @@ class ComparingData:
         return self._smote_oversampled_data
 
     def get_plotly_hist(self,
-                        feature: str,
+                        column_name: str,
                         opacity: float = 0.3,
                         title: str = None):
 
         if self.data1.feature_descriptions is not None:
-            description = self.data1.feature_descriptions.get(feature, feature)
+            description = self.data1.feature_descriptions.get(column_name, column_name)
 
         if title is None:
-            title = f'Сравнение распределений {description}'
+            title = f'Сравнение распределений "{description}"'
 
-        fig = px.histogram(data_frame=self.data1,
-                           x=feature,
+        fig = px.histogram(data_frame=self.data1.data,
+                           x=column_name,
                            color_discrete_sequence=['blue'],
                            opacity=opacity,
-                           labels={feature: self.data1.name}
+                           labels={column_name: self.data1.name}
                            )
 
         fig.add_trace(
             px.histogram(
-                data_frame=self.data2,
-                x=feature,
+                data_frame=self.data2.data,
+                x=column_name,
                 color_discrete_sequence=['red'],
                 opacity=opacity,
-                labels={feature: self.data2.name}
+                labels={column_name: self.data2.name}
             ).data[0]
         )
 
@@ -231,49 +231,61 @@ class ComparingData:
         ax.legend()
 
     def get_compare_hists(self, feature):
-        fig, axes = plt.subplots(1, 3, figsize=(24, 6))
-        if self.data1.feature_descriptions is not None:
-            description = self.data1.feature_descriptions.get(feature, feature)
-        else:
-            description = feature
-        # make hists
-        properties = ['data', 'booted_data_mean', 'booted_data_median']
-        captions = ['Исходные данные',
-                    'Бутстрапированные данные (среднее)',
-                    'Бутстрапированные данные (медиана)'
-        ]
 
-        for i, prop in enumerate(properties):
+        # if self.data1.feature_descriptions is not None:
+        #     description = self.data1.feature_descriptions.get(feature, feature)
+        # else:
+        #     description = feature
 
-            data1 = self.data1.__getattribute__(prop)[feature]
-            data2 = self.data2.__getattribute__(prop)[feature]
-            # Тест на стат различие выборок
-            p_value, test_name = make_test_bw_samples(
-                data1.values,
-                data2.values,
-                alpha=self.alpha,
-                show_test_name=True
-            )
-            p_value = round(p_value, 4)
-            # Тест Шпиро-Уилка
-            test_shapiro = map(stats.shapiro, [data1.values, data2.values])
-            ps1, ps2 = map(lambda x: round(x[1], 4), test_shapiro)
-            # Оформление заголовка
-            title = '\n'.join(
-                [captions[i],
-                 description,
-                 f'Рез.теста Шапиро-Уилка: data1: {ps1}, data2: {ps2}',
-                 f'Название теста:{test_name}',
-                 f'p_value = {p_value}',
-                ]
-            )
-            # Вывод графика
-            self._get_sns_histplot_overlay(
-                data1=data1,
-                data2=data2,
-                ax=axes[i],
-                plot_name=title
-            )
+        # # make hists
+        # properties = ['booted_data_mean', 'booted_data_median']
+        # captions = ['Бутстрапированные данные (среднее)',
+        #             'Бутстрапированные данные (медиана)'
+        # ]
+        #
+
+        # вывод исходного графика
+        self.get_plotly_hist(feature)
+        # FixMe
+        # вывод бустрап по средним значениям
+        fig, axes = plt.subplots(1, 2, figsize=(24, 6))
+
+        data1 = self.data1.booted_data_mean[feature]
+        data2 = self.data2.booted_data_mean[feature]
+        title = 'Бутстрапированные данные (среднее)'
+
+        self._get_sns_histplot_overlay(
+            data1=data1,
+            data2=data2,
+            ax=axes[0],
+            plot_name=title
+        )
+
+        # вывод разницы бустрап по средним значениям
+        self._get_diff_bootstrap_vals_hist(
+            column_name=feature,
+            statistic='mean',
+        )
+
+        # вывод бустрап по медиане
+        fig, axes = plt.subplots(1, 2, figsize=(24, 6))
+
+        data1 = self.data1.booted_data_median[feature]
+        data2 = self.data2.booted_data_median[feature]
+        title = 'Бутстрапированные данные (медиана)'
+
+        self._get_sns_histplot_overlay(
+            data1=data1,
+            data2=data2,
+            ax=axes[0],
+            plot_name=title
+        )
+
+        # вывод разницы бустрап по медиане
+        self._get_diff_bootstrap_vals_hist(
+            column_name=feature,
+            statistic='median',
+        )
 
     def get_all_hists(self):
         for column in self.data1.data.columns:
